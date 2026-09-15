@@ -1,40 +1,46 @@
-name: Build and Deploy to ECS
+name: Deploy Frontend and Backend to ECS
 
 on:
+  repository_dispatch:
+    types:
+      - deploy-both
+
   workflow_dispatch:
+    inputs:
+      frontend_tag:
+        description: "Frontend ECR image tag"
+        required: true
+        type: string
+
+      backend_tag:
+        description: "Backend ECR image tag"
+        required: true
+        type: string
 
 env:
-  # AWS_REGION: ap-south-1
-  # ECR_REPOSITORY: student-frontend
-  # ECS_CLUSTER: fluffy-bat-3tibzr
-  # ECS_SERVICE: student-frontend-task-service-3wkmar44
+  AWS_REGION: ap-south-1
 
+  FRONTEND_ECR_REPOSITORY: student-frontend
+  BACKEND_ECR_REPOSITORY: student-backend
 
+  ECS_CLUSTER: fluffy-bat-3tibzr
 
-  
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
-  ECS_SERVICE: ${{ vars.ECS_SERVICE }}
-  
+  FRONTEND_ECS_SERVICE: student-frontend-task-service-3wkmar44
+  BACKEND_ECS_SERVICE: student-backend-task-bk-service-yzzdiwgy
 
-
-
-
-
+  FRONTEND_TASK_DEFINITION: student-frontend-task
+  BACKEND_TASK_DEFINITION: student-backend-task
 
 jobs:
-  build-and-deploy:
-    name: Build, Push, and Deploy
+
+  deploy-frontend:
+    name: Deploy Frontend
     runs-on: ubuntu-latest
 
     environment:
       name: production
 
     steps:
-      - name: Checkout latest code
-        uses: actions/checkout@v5
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -42,74 +48,118 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          docker build --pull \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
-            .
-
-      - name: Push image to ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-
-      - name: Get current ECS task definition
+      - name: Get frontend task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition student-frontend-task \
+            --task-definition "$FRONTEND_TASK_DEFINITION" \
             --region "$AWS_REGION" \
             --query taskDefinition \
-            --output json > task-definition.json
+            --output json > frontend-task-definition.json
 
-      - name: Create new task definition
+      - name: Create frontend task definition
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.event.client_payload.frontend_tag || inputs.frontend_tag }}
         run: |
-          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}"
+          IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_ECR_REPOSITORY:$IMAGE_TAG"
 
           jq \
             --arg IMAGE "$IMAGE" \
-            '.containerDefinitions[0].image = $IMAGE |
-             del(
-               .taskDefinitionArn,
-               .revision,
-               .status,
-               .requiresAttributes,
-               .compatibilities,
-               .registeredAt,
-               .registeredBy
-             )' \
-            task-definition.json > new-task-definition.json
+            '.
+            | .containerDefinitions[0].image = $IMAGE
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy
+              )' \
+            frontend-task-definition.json > frontend-new-task-definition.json
 
-      - name: Register new task definition
-        id: register
+      - name: Register frontend task definition
+        id: frontend-register
+        env:
+          IMAGE_TAG: ${{ github.event.client_payload.frontend_tag || inputs.frontend_tag }}
         run: |
           TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://new-task-definition.json \
+            --cli-input-json file://frontend-new-task-definition.json \
             --region "$AWS_REGION" \
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
 
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
 
-      - name: Deploy to ECS
+      - name: Deploy frontend
         run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
-            --service "$ECS_SERVICE" \
+            --service "$FRONTEND_ECS_SERVICE" \
             --task-definition "$TASK_DEF_ARN" \
             --region "$AWS_REGION"
 
-      - name: Deployment started
+
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get backend task definition
         run: |
-          echo "Deployment started successfully."
-          echo "Image deployed: $ECR_REPOSITORY:${GITHUB_SHA}"
+          aws ecs describe-task-definition \
+            --task-definition "$BACKEND_TASK_DEFINITION" \
+            --region "$AWS_REGION" \
+            --query taskDefinition \
+            --output json > backend-task-definition.json
+
+      - name: Create backend task definition
+        env:
+          IMAGE_TAG: ${{ github.event.client_payload.backend_tag || inputs.backend_tag }}
+        run: |
+          IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_ECR_REPOSITORY:$IMAGE_TAG"
+
+          jq \
+            --arg IMAGE "$IMAGE" \
+            '.
+            | .containerDefinitions[0].image = $IMAGE
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy
+              )' \
+            backend-task-definition.json > backend-new-task-definition.json
+
+      - name: Register backend task definition
+        id: backend-register
+        env:
+          IMAGE_TAG: ${{ github.event.client_payload.backend_tag || inputs.backend_tag }}
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://backend-new-task-definition.json \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
+
+      - name: Deploy backend
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$BACKEND_ECS_SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --region "$AWS_REGION"
