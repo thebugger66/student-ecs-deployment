@@ -1,12 +1,9 @@
-name: Deploy Frontend and Backend to ECS
+name: Deploy Frontend and Backend
 
 on:
-  repository_dispatch:
-    types:
-      - deploy-both
-
   workflow_dispatch:
     inputs:
+
       frontend_tag:
         description: "Frontend ECR image tag"
         required: true
@@ -56,31 +53,28 @@ jobs:
             --query taskDefinition \
             --output json > frontend-task-definition.json
 
-      - name: Create frontend task definition
+      - name: Update frontend image
         env:
-          IMAGE_TAG: ${{ github.event.client_payload.frontend_tag || inputs.frontend_tag }}
+          IMAGE_TAG: ${{ inputs.frontend_tag }}
         run: |
           IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_ECR_REPOSITORY:$IMAGE_TAG"
 
           jq \
             --arg IMAGE "$IMAGE" \
-            '.
-            | .containerDefinitions[0].image = $IMAGE
-            | del(
-                .taskDefinitionArn,
-                .revision,
-                .status,
-                .requiresAttributes,
-                .compatibilities,
-                .registeredAt,
-                .registeredBy
-              )' \
+            '.containerDefinitions[0].image = $IMAGE |
+             del(
+               .taskDefinitionArn,
+               .revision,
+               .status,
+               .requiresAttributes,
+               .compatibilities,
+               .registeredAt,
+               .registeredBy
+             )' \
             frontend-task-definition.json > frontend-new-task-definition.json
 
       - name: Register frontend task definition
         id: frontend-register
-        env:
-          IMAGE_TAG: ${{ github.event.client_payload.frontend_tag || inputs.frontend_tag }}
         run: |
           TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://frontend-new-task-definition.json \
@@ -122,31 +116,28 @@ jobs:
             --query taskDefinition \
             --output json > backend-task-definition.json
 
-      - name: Create backend task definition
+      - name: Update backend image
         env:
-          IMAGE_TAG: ${{ github.event.client_payload.backend_tag || inputs.backend_tag }}
+          IMAGE_TAG: ${{ inputs.backend_tag }}
         run: |
           IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_ECR_REPOSITORY:$IMAGE_TAG"
 
           jq \
             --arg IMAGE "$IMAGE" \
-            '.
-            | .containerDefinitions[0].image = $IMAGE
-            | del(
-                .taskDefinitionArn,
-                .revision,
-                .status,
-                .requiresAttributes,
-                .compatibilities,
-                .registeredAt,
-                .registeredBy
-              )' \
+            '.containerDefinitions[0].image = $IMAGE |
+             del(
+               .taskDefinitionArn,
+               .revision,
+               .status,
+               .requiresAttributes,
+               .compatibilities,
+               .registeredAt,
+               .registeredBy
+             )' \
             backend-task-definition.json > backend-new-task-definition.json
 
       - name: Register backend task definition
         id: backend-register
-        env:
-          IMAGE_TAG: ${{ github.event.client_payload.backend_tag || inputs.backend_tag }}
         run: |
           TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://backend-new-task-definition.json \
