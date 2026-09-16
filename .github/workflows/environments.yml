@@ -1,40 +1,3 @@
-# name: Dev Stage Production
-
-# on:
-#   workflow_dispatch:
-
-# jobs:
-#   development:
-#     name: Deploy to Development
-#     runs-on: ubuntu-latest
-#     environment:
-#       name: development
-
-#     steps:
-#       - name: Development
-#         run: echo "Development deployment completed"
-
-#   staging:
-#     name: Deploy to Staging
-#     needs: development
-#     runs-on: ubuntu-latest
-#     environment:
-#       name: staging
-
-#     steps:
-#       - name: Staging
-#         run: echo "Staging deployment completed"
-
-#   production:
-#     name: Deploy to Production
-#     needs: staging
-#     runs-on: ubuntu-latest
-#     environment:
-#       name: production
-
-#     steps:
-#       - name: Production
-#         run: echo "Production deployment completed"
 name: Dev Stage Production
 
 on:
@@ -50,8 +13,27 @@ on:
         required: true
         type: string
 
+env:
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+  FRONTEND_ECR_REPOSITORY: student-frontend
+  BACKEND_ECR_REPOSITORY: student-backend
+
+  ECS_CLUSTER: fluffy-bat-3tibzr
+
+  FRONTEND_ECS_SERVICE: student-frontend-task-service-3wkmar44
+  BACKEND_ECS_SERVICE: student-backend-task-bk-service-yzzdiwgy
+
+  FRONTEND_TASK_DEFINITION: student-frontend-task
+  BACKEND_TASK_DEFINITION: student-backend-task
+
+
 jobs:
 
+  # ============================================================
+  # DEVELOPMENT
+  # ============================================================
   development:
     name: Deploy to Development
     runs-on: ubuntu-latest
@@ -60,12 +42,139 @@ jobs:
       name: development
 
     steps:
-      - name: Show selected image tags
-        run: |
-          echo "Development environment"
-          echo "Frontend image tag: ${{ inputs.frontend_tag }}"
-          echo "Backend image tag: ${{ inputs.backend_tag }}"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
+      - name: Check AWS connection
+        run: |
+          aws sts get-caller-identity
+
+      - name: Validate frontend image
+        run: |
+          echo "Checking frontend image..."
+          echo "Repository: $FRONTEND_ECR_REPOSITORY"
+          echo "Tag: ${{ inputs.frontend_tag }}"
+
+          aws ecr describe-images \
+            --repository-name "$FRONTEND_ECR_REPOSITORY" \
+            --image-ids imageTag="${{ inputs.frontend_tag }}" \
+            --region "$AWS_REGION"
+
+          echo "Frontend image exists."
+
+      - name: Validate backend image
+        run: |
+          echo "Checking backend image..."
+          echo "Repository: $BACKEND_ECR_REPOSITORY"
+          echo "Tag: ${{ inputs.backend_tag }}"
+
+          aws ecr describe-images \
+            --repository-name "$BACKEND_ECR_REPOSITORY" \
+            --image-ids imageTag="${{ inputs.backend_tag }}" \
+            --region "$AWS_REGION"
+
+          echo "Backend image exists."
+
+      # ---------------- FRONTEND ----------------
+      - name: Get frontend task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$FRONTEND_TASK_DEFINITION" \
+            --region "$AWS_REGION" \
+            --query taskDefinition \
+            --output json > frontend-task-definition.json
+
+      - name: Update frontend image
+        run: |
+          IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_ECR_REPOSITORY:${{ inputs.frontend_tag }}"
+
+          jq \
+            --arg IMAGE "$IMAGE" \
+            '.containerDefinitions[0].image = $IMAGE |
+             del(
+               .taskDefinitionArn,
+               .revision,
+               .status,
+               .requiresAttributes,
+               .compatibilities,
+               .registeredAt,
+               .registeredBy
+             )' \
+            frontend-task-definition.json > frontend-new-task-definition.json
+
+      - name: Register frontend task definition
+        id: frontend-register
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://frontend-new-task-definition.json \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
+
+      - name: Deploy frontend to ECS
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$FRONTEND_ECS_SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --region "$AWS_REGION"
+
+      # ---------------- BACKEND ----------------
+      - name: Get backend task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$BACKEND_TASK_DEFINITION" \
+            --region "$AWS_REGION" \
+            --query taskDefinition \
+            --output json > backend-task-definition.json
+
+      - name: Update backend image
+        run: |
+          IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_ECR_REPOSITORY:${{ inputs.backend_tag }}"
+
+          jq \
+            --arg IMAGE "$IMAGE" \
+            '.containerDefinitions[0].image = $IMAGE |
+             del(
+               .taskDefinitionArn,
+               .revision,
+               .status,
+               .requiresAttributes,
+               .compatibilities,
+               .registeredAt,
+               .registeredBy
+             )' \
+            backend-task-definition.json > backend-new-task-definition.json
+
+      - name: Register backend task definition
+        id: backend-register
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://backend-new-task-definition.json \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
+
+      - name: Deploy backend to ECS
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$BACKEND_ECS_SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --region "$AWS_REGION"
+
+
+  # ============================================================
+  # STAGING
+  # ============================================================
   staging:
     name: Deploy to Staging
     needs: development
@@ -75,12 +184,33 @@ jobs:
       name: staging
 
     steps:
-      - name: Show selected image tags
-        run: |
-          echo "Staging environment"
-          echo "Frontend image tag: ${{ inputs.frontend_tag }}"
-          echo "Backend image tag: ${{ inputs.backend_tag }}"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
+      - name: Check AWS connection
+        run: |
+          aws sts get-caller-identity
+
+      - name: Deploy frontend to staging
+        run: |
+          echo "Deploying frontend tag: ${{ inputs.frontend_tag }}"
+
+      - name: Deploy backend to staging
+        run: |
+          echo "Deploying backend tag: ${{ inputs.backend_tag }}"
+
+      - name: Staging completed
+        run: |
+          echo "Staging deployment completed."
+
+
+  # ============================================================
+  # PRODUCTION
+  # ============================================================
   production:
     name: Deploy to Production
     needs: staging
@@ -90,8 +220,25 @@ jobs:
       name: production
 
     steps:
-      - name: Show selected image tags
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check AWS connection
         run: |
-          echo "Production environment"
-          echo "Frontend image tag: ${{ inputs.frontend_tag }}"
-          echo "Backend image tag: ${{ inputs.backend_tag }}"
+          aws sts get-caller-identity
+
+      - name: Deploy frontend to production
+        run: |
+          echo "Deploying frontend tag: ${{ inputs.frontend_tag }}"
+
+      - name: Deploy backend to production
+        run: |
+          echo "Deploying backend tag: ${{ inputs.backend_tag }}"
+
+      - name: Production completed
+        run: |
+          echo "Production deployment completed."
