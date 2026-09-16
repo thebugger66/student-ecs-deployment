@@ -1,9 +1,8 @@
-name: Deploy Frontend and Backend
+name: Deploy Frontend and Backend to ECS
 
 on:
   workflow_dispatch:
     inputs:
-
       frontend_tag:
         description: "Frontend ECR image tag"
         required: true
@@ -16,6 +15,7 @@ on:
 
 env:
   AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
   FRONTEND_ECR_REPOSITORY: student-frontend
   BACKEND_ECR_REPOSITORY: student-backend
@@ -28,14 +28,34 @@ env:
   FRONTEND_TASK_DEFINITION: student-frontend-task
   BACKEND_TASK_DEFINITION: student-backend-task
 
+
 jobs:
 
-  deploy-frontend:
-    name: Deploy Frontend
+  # --------------------------------------------------
+  # 1. WAIT FOR MANUAL APPROVAL
+  # --------------------------------------------------
+  approval:
+    name: Approve Production Deployment
     runs-on: ubuntu-latest
 
     environment:
       name: production
+
+    steps:
+      - name: Deployment approved
+        run: |
+          echo "Production deployment approved."
+          echo "Frontend image: ${{ inputs.frontend_tag }}"
+          echo "Backend image: ${{ inputs.backend_tag }}"
+
+
+  # --------------------------------------------------
+  # 2. DEPLOY FRONTEND
+  # --------------------------------------------------
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: approval
+    runs-on: ubuntu-latest
 
     steps:
       - name: Configure AWS credentials
@@ -45,7 +65,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get frontend task definition
+      - name: Validate frontend image
+        run: |
+          aws ecr describe-images \
+            --repository-name "$FRONTEND_ECR_REPOSITORY" \
+            --image-ids imageTag="${{ inputs.frontend_tag }}" \
+            --region "$AWS_REGION"
+
+      - name: Get current frontend task definition
         run: |
           aws ecs describe-task-definition \
             --task-definition "$FRONTEND_TASK_DEFINITION" \
@@ -54,10 +81,8 @@ jobs:
             --output json > frontend-task-definition.json
 
       - name: Update frontend image
-        env:
-          IMAGE_TAG: ${{ inputs.frontend_tag }}
         run: |
-          IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_ECR_REPOSITORY:$IMAGE_TAG"
+          IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_ECR_REPOSITORY:${{ inputs.frontend_tag }}"
 
           jq \
             --arg IMAGE "$IMAGE" \
@@ -84,7 +109,7 @@ jobs:
 
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
 
-      - name: Deploy frontend
+      - name: Deploy frontend to ECS
         run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
@@ -93,12 +118,13 @@ jobs:
             --region "$AWS_REGION"
 
 
+  # --------------------------------------------------
+  # 3. DEPLOY BACKEND
+  # --------------------------------------------------
   deploy-backend:
     name: Deploy Backend
+    needs: approval
     runs-on: ubuntu-latest
-
-    environment:
-      name: production
 
     steps:
       - name: Configure AWS credentials
@@ -108,7 +134,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get backend task definition
+      - name: Validate backend image
+        run: |
+          aws ecr describe-images \
+            --repository-name "$BACKEND_ECR_REPOSITORY" \
+            --image-ids imageTag="${{ inputs.backend_tag }}" \
+            --region "$AWS_REGION"
+
+      - name: Get current backend task definition
         run: |
           aws ecs describe-task-definition \
             --task-definition "$BACKEND_TASK_DEFINITION" \
@@ -117,10 +150,8 @@ jobs:
             --output json > backend-task-definition.json
 
       - name: Update backend image
-        env:
-          IMAGE_TAG: ${{ inputs.backend_tag }}
         run: |
-          IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_ECR_REPOSITORY:$IMAGE_TAG"
+          IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_ECR_REPOSITORY:${{ inputs.backend_tag }}"
 
           jq \
             --arg IMAGE "$IMAGE" \
@@ -147,7 +178,7 @@ jobs:
 
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
 
-      - name: Deploy backend
+      - name: Deploy backend to ECS
         run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
