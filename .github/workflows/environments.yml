@@ -2,31 +2,13 @@ name: Dev Stage Production
 
 on:
   workflow_dispatch:
-    inputs:
-      frontend_tag:
-        description: "Frontend ECR image tag"
-        required: true
-        type: string
-
-      backend_tag:
-        description: "Backend ECR image tag"
-        required: true
-        type: string
 
 env:
   AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-
-  FRONTEND_ECR_REPOSITORY: student-frontend
-  BACKEND_ECR_REPOSITORY: student-backend
-
   ECS_CLUSTER: fluffy-bat-3tibzr
 
   FRONTEND_ECS_SERVICE: student-frontend-task-service-3wkmar44
   BACKEND_ECS_SERVICE: student-backend-task-bk-service-yzzdiwgy
-
-  FRONTEND_TASK_DEFINITION: student-frontend-task
-  BACKEND_TASK_DEFINITION: student-backend-task
 
 
 jobs:
@@ -42,6 +24,7 @@ jobs:
       name: development
 
     steps:
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -53,123 +36,33 @@ jobs:
         run: |
           aws sts get-caller-identity
 
-      - name: Validate frontend image
+      - name: Deploy Frontend
         run: |
-          echo "Checking frontend image..."
-          echo "Repository: $FRONTEND_ECR_REPOSITORY"
-          echo "Tag: ${{ inputs.frontend_tag }}"
+          echo "Starting frontend deployment..."
 
-          aws ecr describe-images \
-            --repository-name "$FRONTEND_ECR_REPOSITORY" \
-            --image-ids imageTag="${{ inputs.frontend_tag }}" \
-            --region "$AWS_REGION"
-
-          echo "Frontend image exists."
-
-      - name: Validate backend image
-        run: |
-          echo "Checking backend image..."
-          echo "Repository: $BACKEND_ECR_REPOSITORY"
-          echo "Tag: ${{ inputs.backend_tag }}"
-
-          aws ecr describe-images \
-            --repository-name "$BACKEND_ECR_REPOSITORY" \
-            --image-ids imageTag="${{ inputs.backend_tag }}" \
-            --region "$AWS_REGION"
-
-          echo "Backend image exists."
-
-      # ---------------- FRONTEND ----------------
-      - name: Get frontend task definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition "$FRONTEND_TASK_DEFINITION" \
-            --region "$AWS_REGION" \
-            --query taskDefinition \
-            --output json > frontend-task-definition.json
-
-      - name: Update frontend image
-        run: |
-          IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_ECR_REPOSITORY:${{ inputs.frontend_tag }}"
-
-          jq \
-            --arg IMAGE "$IMAGE" \
-            '.containerDefinitions[0].image = $IMAGE |
-             del(
-               .taskDefinitionArn,
-               .revision,
-               .status,
-               .requiresAttributes,
-               .compatibilities,
-               .registeredAt,
-               .registeredBy
-             )' \
-            frontend-task-definition.json > frontend-new-task-definition.json
-
-      - name: Register frontend task definition
-        id: frontend-register
-        run: |
-          TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://frontend-new-task-definition.json \
-            --region "$AWS_REGION" \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
-
-          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
-
-      - name: Deploy frontend to ECS
-        run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$FRONTEND_ECS_SERVICE" \
-            --task-definition "$TASK_DEF_ARN" \
+            --force-new-deployment \
             --region "$AWS_REGION"
 
-      # ---------------- BACKEND ----------------
-      - name: Get backend task definition
+          echo "Frontend deployment started."
+
+      - name: Deploy Backend
         run: |
-          aws ecs describe-task-definition \
-            --task-definition "$BACKEND_TASK_DEFINITION" \
-            --region "$AWS_REGION" \
-            --query taskDefinition \
-            --output json > backend-task-definition.json
+          echo "Starting backend deployment..."
 
-      - name: Update backend image
-        run: |
-          IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_ECR_REPOSITORY:${{ inputs.backend_tag }}"
-
-          jq \
-            --arg IMAGE "$IMAGE" \
-            '.containerDefinitions[0].image = $IMAGE |
-             del(
-               .taskDefinitionArn,
-               .revision,
-               .status,
-               .requiresAttributes,
-               .compatibilities,
-               .registeredAt,
-               .registeredBy
-             )' \
-            backend-task-definition.json > backend-new-task-definition.json
-
-      - name: Register backend task definition
-        id: backend-register
-        run: |
-          TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://backend-new-task-definition.json \
-            --region "$AWS_REGION" \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
-
-          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> "$GITHUB_ENV"
-
-      - name: Deploy backend to ECS
-        run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$BACKEND_ECS_SERVICE" \
-            --task-definition "$TASK_DEF_ARN" \
+            --force-new-deployment \
             --region "$AWS_REGION"
+
+          echo "Backend deployment started."
+
+      - name: Development deployment completed
+        run: |
+          echo "Development deployment completed."
 
 
   # ============================================================
@@ -184,6 +77,7 @@ jobs:
       name: staging
 
     steps:
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -195,15 +89,31 @@ jobs:
         run: |
           aws sts get-caller-identity
 
-      - name: Deploy frontend to staging
+      - name: Deploy Frontend
         run: |
-          echo "Deploying frontend tag: ${{ inputs.frontend_tag }}"
+          echo "Starting frontend staging deployment..."
 
-      - name: Deploy backend to staging
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$FRONTEND_ECS_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+
+          echo "Frontend staging deployment started."
+
+      - name: Deploy Backend
         run: |
-          echo "Deploying backend tag: ${{ inputs.backend_tag }}"
+          echo "Starting backend staging deployment..."
 
-      - name: Staging completed
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$BACKEND_ECS_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+
+          echo "Backend staging deployment started."
+
+      - name: Staging deployment completed
         run: |
           echo "Staging deployment completed."
 
@@ -220,6 +130,7 @@ jobs:
       name: production
 
     steps:
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -231,14 +142,30 @@ jobs:
         run: |
           aws sts get-caller-identity
 
-      - name: Deploy frontend to production
+      - name: Deploy Frontend
         run: |
-          echo "Deploying frontend tag: ${{ inputs.frontend_tag }}"
+          echo "Starting frontend production deployment..."
 
-      - name: Deploy backend to production
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$FRONTEND_ECS_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+
+          echo "Frontend production deployment started."
+
+      - name: Deploy Backend
         run: |
-          echo "Deploying backend tag: ${{ inputs.backend_tag }}"
+          echo "Starting backend production deployment..."
 
-      - name: Production completed
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$BACKEND_ECS_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+
+          echo "Backend production deployment started."
+
+      - name: Production deployment completed
         run: |
           echo "Production deployment completed."
