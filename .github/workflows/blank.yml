@@ -1,0 +1,21 @@
+name: Production Deployment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+      - name: Start deployment
+        run: |
+          echo "Deployment started"
+          echo "Environment: production"
+
+      - name: Deploy application
+        run: |
+          echo "Deploying application to AWS ECS..."
