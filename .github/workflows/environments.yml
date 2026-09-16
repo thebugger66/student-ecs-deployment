@@ -1,37 +1,97 @@
+# name: Dev Stage Production
+
+# on:
+#   workflow_dispatch:
+
+# jobs:
+#   development:
+#     name: Deploy to Development
+#     runs-on: ubuntu-latest
+#     environment:
+#       name: development
+
+#     steps:
+#       - name: Development
+#         run: echo "Development deployment completed"
+
+#   staging:
+#     name: Deploy to Staging
+#     needs: development
+#     runs-on: ubuntu-latest
+#     environment:
+#       name: staging
+
+#     steps:
+#       - name: Staging
+#         run: echo "Staging deployment completed"
+
+#   production:
+#     name: Deploy to Production
+#     needs: staging
+#     runs-on: ubuntu-latest
+#     environment:
+#       name: production
+
+#     steps:
+#       - name: Production
+#         run: echo "Production deployment completed"
 name: Dev Stage Production
 
 on:
   workflow_dispatch:
+    inputs:
+      frontend_tag:
+        description: "Frontend ECR image tag"
+        required: true
+        type: string
+
+      backend_tag:
+        description: "Backend ECR image tag"
+        required: true
+        type: string
 
 jobs:
+
   development:
     name: Deploy to Development
     runs-on: ubuntu-latest
+
     environment:
       name: development
 
     steps:
-      - name: Development
-        run: echo "Development deployment completed"
+      - name: Show selected image tags
+        run: |
+          echo "Development environment"
+          echo "Frontend image tag: ${{ inputs.frontend_tag }}"
+          echo "Backend image tag: ${{ inputs.backend_tag }}"
 
   staging:
     name: Deploy to Staging
     needs: development
     runs-on: ubuntu-latest
+
     environment:
       name: staging
 
     steps:
-      - name: Staging
-        run: echo "Staging deployment completed"
+      - name: Show selected image tags
+        run: |
+          echo "Staging environment"
+          echo "Frontend image tag: ${{ inputs.frontend_tag }}"
+          echo "Backend image tag: ${{ inputs.backend_tag }}"
 
   production:
     name: Deploy to Production
     needs: staging
     runs-on: ubuntu-latest
+
     environment:
       name: production
 
     steps:
-      - name: Production
-        run: echo "Production deployment completed"
+      - name: Show selected image tags
+        run: |
+          echo "Production environment"
+          echo "Frontend image tag: ${{ inputs.frontend_tag }}"
+          echo "Backend image tag: ${{ inputs.backend_tag }}"
